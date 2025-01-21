@@ -18,8 +18,8 @@ loader = None
 db_manager = ChromaDBManager(collection_name=COLLECTION_NAME)
 
 
-async def get_context(query, video_id):
-    documents = await db_manager.query(
+def get_context(query: str, video_id: str) -> str:
+    documents = db_manager.query(
         query=query,
         filter_query={
             "$and": [
@@ -53,7 +53,7 @@ def get_existing_summary(user_query: str, video_id: str) -> str:
         return document.page_content
 
 
-async def generate_summary(split_docs):
+async def generate_summary(split_docs: list) -> str:
     async for step in app.astream(
         {"contents": [doc.page_content for doc in split_docs]},
         {"recursion_limit": 10},
@@ -63,51 +63,59 @@ async def generate_summary(split_docs):
     return summary
 
 
-async def execute(title):
+async def execute(title: str):
     global loader
-    chat_history = []
+
     import streamlit as st
+    st.title(f"💬 {title}")
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = [
+            {"role": "assistant", "content": "How can I help you?"}]
 
-    st.title(title)
+    for msg in st.session_state.messages:
+        st.chat_message(msg["role"]).write(msg["content"])
 
-    user_input = st.text_input("You: ", "", key="user_input")
+    if user_input := st.chat_input():
+        st.session_state.messages.append(
+            {"role": "user", "content": user_input})
+        st.chat_message("user").write(user_input)
+        if user_input:
+            if not loader and URL_KEY_TERM not in user_input:
+                response = NO_URL_RESPONSE
+            elif URL_KEY_TERM in user_input:
+                url = extract_youtube_url(user_input)
+                if not url:
+                    response = WRONG_URL_RESPONSE
 
-    if user_input:
-        if not loader and URL_KEY_TERM not in user_input:
-            response = NO_URL_RESPONSE
-        elif URL_KEY_TERM in user_input:
-            url = extract_youtube_url(user_input)
-            st.title(loader.title)
-            if not url:
-                response = WRONG_URL_RESPONSE
-
-            loader = YoutubeLoader.from_youtube_url(url)
-            summary = get_existing_summary(user_input, loader.video_id)
-            video_already_scraped = True if summary else False
-            if video_already_scraped:
-                response = summary
-            else:
-                loader.load()
-                if not loader.sub_title:
-                    response = EXTRACTION_FAILED_RESPONSE
+                loader = YoutubeLoader.from_youtube_url(url)
+                summary = get_existing_summary(user_input, loader.video_id)
+                video_already_scraped = True if summary else False
+                if video_already_scraped:
+                    response = summary
                 else:
-                    text_list = split_by_character(
-                        loader.sub_title, chunk_size=1000)
-                    response = await generate_summary(text_list)
-                    text_list.append(response)
-                    metadata = {
-                        "id": loader.video_id,
-                        "title": loader.title,
-                        "type": CHUNK_TYPE
-                    }
-                    await db_manager.add_documents(
-                        text_list, metadata, has_summary=True)
+                    loader.load()
+                    if not loader.sub_title:
+                        response = EXTRACTION_FAILED_RESPONSE
+                    else:
+                        summary_text_list = split_by_character(
+                            loader.sub_title, chunk_size=5000)
+                        text_list = split_by_character(
+                            loader.sub_title, chunk_size=1000)
+                        response = await generate_summary(summary_text_list)
+                        text_list.append(response)
+                        metadata = {
+                            "id": loader.video_id,
+                            "title": loader.title,
+                            "type": CHUNK_TYPE
+                        }
+                        await db_manager.add_documents(
+                            text_list, metadata, has_summary=True)
 
-        elif URL_KEY_TERM not in user_input:
-            context = get_context(user_input, loader.video_id)
-            response = get_response_message(context, user_input)
-
-        chat_history.append(f"You: {user_input}")
-        chat_history.append(f"Bot: {response}")
-        for message in chat_history:
-            st.write(message)
+            elif URL_KEY_TERM not in user_input:
+                context = get_context(user_input, loader.video_id)
+                response = get_response_message(context, user_input)
+            print(loader.title)
+            response = f"{loader.title if loader else ''}\n {response}"
+            st.session_state.messages.append(
+                {"role": "assistant", "content": response})
+            st.chat_message("assistant").write(response)

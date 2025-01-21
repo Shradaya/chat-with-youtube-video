@@ -16,15 +16,13 @@ of the main themes.
 RAG_PROMPT = PromptTemplate(template="""
 <rules>
 Answer to the provided question with the given context.
-Do not go beyond the context to answer the questions. Do not assume
+Do not go beyond the context to answer the questions. Do not assume.
 Answer casual greetings and conversation QUESTION.
   For example,
     Human: Hey!
     AI: Hello! How can I help?
-If the context doesn't have required answer respond with. 
-  - Can't answer to the given question.
 </rules>
-Never give me any answers that are not mentioned inside the <rules></rules> above. 
+Always abide by the rules mentioned within the <rules></rules> above. 
 The context is provided between three backticks.
 The question is provided between three astreik.
 ```{context}```
