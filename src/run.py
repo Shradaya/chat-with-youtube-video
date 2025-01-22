@@ -11,7 +11,8 @@ from .constants import (
     NO_URL_RESPONSE,
     WRONG_URL_RESPONSE,
     EXTRACTION_FAILED_RESPONSE,
-    URL_KEY_TERM
+    URL_KEY_TERM,
+    INITIAL_MESSAGE
 )
 
 loader = None
@@ -70,7 +71,7 @@ async def execute(title: str):
     st.title(f"💬 {title}")
     if "messages" not in st.session_state:
         st.session_state["messages"] = [
-            {"role": "assistant", "content": "How can I help you?"}]
+            {"role": "assistant", "content": INITIAL_MESSAGE}]
 
     for msg in st.session_state.messages:
         st.chat_message(msg["role"]).write(msg["content"])
@@ -100,7 +101,7 @@ async def execute(title: str):
                         summary_text_list = split_by_character(
                             loader.sub_title, chunk_size=5000)
                         text_list = split_by_character(
-                            loader.sub_title, chunk_size=1000)
+                            loader.sub_title, chunk_size=500)
                         response = await generate_summary(summary_text_list)
                         text_list.append(response)
                         metadata = {
@@ -115,7 +116,7 @@ async def execute(title: str):
                 context = get_context(user_input, loader.video_id)
                 response = get_response_message(context, user_input)
             print(loader.title)
-            response = f"{loader.title if loader else ''}\n {response}"
+            response = f"**{loader.title}**\n\n{response}"
             st.session_state.messages.append(
                 {"role": "assistant", "content": response})
             st.chat_message("assistant").write(response)
