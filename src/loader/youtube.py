@@ -6,16 +6,18 @@ import requests
 import yt_dlp as youtube_dl
 from pytubefix import YouTube
 from bs4 import BeautifulSoup
+from .constants import OUTPUT_PATH
 from langchain_text_splitters import CharacterTextSplitter
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled
 
 
 class YoutubeLoader:
-    def __init__(self, url, video_id, title, language=["en"], translation=["en"]):
+    def __init__(self, url, video_id, title, local=False, language=["en"], translation=["en"]):
         self.url = url
         self.video_id = video_id
         self.language = language
         self.translation = translation
+        self.local = local
         self.title = title
         self.sub_title = ""
 
@@ -76,6 +78,37 @@ class YoutubeLoader:
         kwargs.update({"title": cls.get_title(youtube_url)})
         return cls(youtube_url, video_id, **kwargs)
 
+    @classmethod
+    def from_local_file_path(cls, uploaded_file, **kwargs: dict):
+        """
+        Creates an instance of the class from a YouTube URL.
+
+        Validates the URL to ensure it is from a supported YouTube domain and 
+        extracts the video ID and title. The extracted information is passed 
+        as arguments to initialize the class instance.
+
+        Args:
+            youtube_url (str): The YouTube video URL.
+            **kwargs (dict): Additional keyword arguments to be passed to the class constructor.
+
+        Returns:
+            cls: An instance of the class initialized with the YouTube URL, video ID, and additional data.
+
+        Raises:
+            ValueError: If the URL is not from a supported YouTube domain.
+        """
+        file_id = uploaded_file.file_id
+        audio_output_path = f"{OUTPUT_PATH}/{file_id}.mp3"
+        with open(audio_output_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        kwargs.update({
+            "url": audio_output_path,
+            "video_id": file_id,
+            "title": uploaded_file.name,
+            "local": True
+        })
+        return cls(**kwargs)
+
     def __create_or_empty_directory(self, directory_path):
         """
         Creates a new directory if it doesn't exist, or empties the existing directory.
@@ -112,22 +145,21 @@ class YoutubeLoader:
         Raises:
             Exception: If unable to download the audio.
         """
-        output_path = os.path.join(os.path.normpath(
-            os.getcwd() + os.sep + os.pardir), "output")
-        self.__create_or_empty_directory(output_path)
+        self.__create_or_empty_directory(OUTPUT_PATH)
         try:
             yt = YouTube(self.url)
             video = yt.streams.filter(only_audio=True).first()
             time.sleep(2)
 
-            out_file = video.download(output_path=output_path)
+            out_file = video.download(output_path=OUTPUT_PATH)
             base, _ = os.path.splitext(out_file)
             new_file = base + '.mp3'
             os.rename(out_file, new_file)
             return new_file
-        except:
+        except Exception as e:
+            print(e)
             print("Unable to download MP3")
-            output_path = f'{output_path}\output.webm'
+            output_path = f'{OUTPUT_PATH}\output.webm'
             options = {
                 'format': 'bestaudio/best',
                 'keepvideo': False,
@@ -193,25 +225,26 @@ class YoutubeLoader:
         Raises:
             Exception: If both transcript retrieval and audio transcription fail.
         """
-        try:
-            # Attempt to get the transcript from the YouTube Transcript API
-            sub = YouTubeTranscriptApi.get_transcript(self.video_id)
-            self.sub_title = " ".join([x['text'] for x in sub])
-        except TranscriptsDisabled:
-            # If transcripts are disabled for this video, notify and try to transcribe audio
-            print(
-                "Transcripts are disabled for this video. Processing can take extra time.")
-        except Exception as e:
-            # Catch any other errors related to transcript retrieval
-            print(f"Error retrieving transcript: {e}")
-
-        if not hasattr(self, 'sub_title'):
+        if not self.local:
+            try:
+                # Attempt to get the transcript from the YouTube Transcript API
+                sub = YouTubeTranscriptApi.get_transcript(self.video_id)
+                self.sub_title = " ".join([x['text'] for x in sub])
+            except TranscriptsDisabled:
+                # If transcripts are disabled for this video, notify and try to transcribe audio
+                print(
+                    "Transcripts are disabled for this video. Processing can take extra time.")
+            except Exception as e:
+                # Catch any other errors related to transcript retrieval
+                print(f"Error retrieving transcript: {e}")
+        if not self.sub_title:
             try:
                 # If subtitle is not set, download audio and transcribe it
-                audio_path = self.__download_audio_from_video()
+                audio_path = self.url if self.local else self.__download_audio_from_video()
                 result = self.__self_transcribe_audio(audio_path)
                 if result:
                     self.sub_title = result.get("text", "")
+                    print(self.sub_title)
             except Exception as e:
                 print(f"Error in audio extraction or transcription: {e}")
                 print("Audio could not be extracted or transcribed.")
@@ -228,8 +261,3 @@ class YoutubeLoader:
         )
         splitted_text = text_splitter.create_documents([self.sub_title])
         return splitted_text
-
-
-# loader = YoutubeLoader.from_youtube_url(
-#     "https://www.youtube.com/watch?v=3dm2QdJplRk")
-# loader.load()

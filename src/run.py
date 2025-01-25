@@ -12,14 +12,14 @@ from .constants import (
     WRONG_URL_RESPONSE,
     EXTRACTION_FAILED_RESPONSE,
     URL_KEY_TERM,
-    INITIAL_MESSAGE
+    INITIAL_MESSAGE,
 )
 
 loader = None
 db_manager = ChromaDBManager(collection_name=COLLECTION_NAME)
 
 
-def get_context(query: str, video_id: str) -> str:
+def get_context(query: str, video_id: str, title: str = "") -> str:
     documents = db_manager.query(
         query=query,
         filter_query={
@@ -28,7 +28,14 @@ def get_context(query: str, video_id: str) -> str:
                     "type": CHUNK_TYPE
                 },
                 {
-                    "id": video_id
+                    "$or": [
+                        {
+                            "id": video_id
+                        },
+                        {
+                            "title": title
+                        }
+                    ]
                 }
             ]
         })
@@ -36,7 +43,7 @@ def get_context(query: str, video_id: str) -> str:
     return " ".join(document_list)
 
 
-def get_existing_summary(user_query: str, video_id: str) -> str:
+def get_existing_summary(user_query: str, video_id: str, title: str = "") -> str:
     documents = db_manager.query(
         query=user_query,
         filter_query={
@@ -45,7 +52,14 @@ def get_existing_summary(user_query: str, video_id: str) -> str:
                     "type": SUMMARY_TYPE
                 },
                 {
-                    "id": video_id
+                    "$or": [
+                        {
+                            "id": video_id
+                        },
+                        {
+                            "title": title
+                        }
+                    ]
                 }
             ]
         }, n_results=1)
@@ -64,6 +78,27 @@ async def generate_summary(split_docs: list) -> str:
     return summary
 
 
+async def get_response(loader):
+    response = ""
+    if not loader.sub_title:
+        response = EXTRACTION_FAILED_RESPONSE
+    else:
+        summary_text_list = split_by_character(
+            loader.sub_title, chunk_size=5000)
+        text_list = split_by_character(
+            loader.sub_title, chunk_size=500)
+        response = await generate_summary(summary_text_list)
+        text_list.append(response)
+        metadata = {
+            "id": loader.video_id,
+            "title": loader.title,
+            "type": CHUNK_TYPE
+        }
+        await db_manager.add_documents(
+            text_list, metadata, has_summary=True)
+    return response
+
+
 async def execute(title: str):
     global loader
 
@@ -75,8 +110,8 @@ async def execute(title: str):
 
     for msg in st.session_state.messages:
         st.chat_message(msg["role"]).write(msg["content"])
-
-    if user_input := st.chat_input():
+    user_input = st.chat_input()
+    if user_input:
         st.session_state.messages.append(
             {"role": "user", "content": user_input})
         st.chat_message("user").write(user_input)
@@ -95,27 +130,34 @@ async def execute(title: str):
                     response = summary
                 else:
                     loader.load()
-                    if not loader.sub_title:
-                        response = EXTRACTION_FAILED_RESPONSE
-                    else:
-                        summary_text_list = split_by_character(
-                            loader.sub_title, chunk_size=5000)
-                        text_list = split_by_character(
-                            loader.sub_title, chunk_size=500)
-                        response = await generate_summary(summary_text_list)
-                        text_list.append(response)
-                        metadata = {
-                            "id": loader.video_id,
-                            "title": loader.title,
-                            "type": CHUNK_TYPE
-                        }
-                        await db_manager.add_documents(
-                            text_list, metadata, has_summary=True)
+                    response = await get_response(loader)
 
             elif URL_KEY_TERM not in user_input:
-                context = get_context(user_input, loader.video_id)
+                context = get_context(
+                    user_input, loader.video_id, loader.title)
+                print(context)
                 response = get_response_message(context, user_input)
-            print(loader.title)
+            response = f"**{loader.title}**\n\n{response}"
+            st.session_state.messages.append(
+                {"role": "assistant", "content": response})
+            st.chat_message("assistant").write(response)
+
+    if uploaded_file := st.file_uploader("Upload MP3", type=["mp3"]):
+        if not user_input:
+            if uploaded_file:
+                st.chat_message("assistant").write(
+                    f"🎧 MP3 file uploaded: {uploaded_file.name}.\n\nPlease wait while your file is being processed")
+                loader = YoutubeLoader.from_local_file_path(
+                    uploaded_file=uploaded_file)
+            uploaded_file = None
+            summary = get_existing_summary("", loader.video_id, loader.title)
+            video_already_scraped = True if summary else False
+            if video_already_scraped:
+                response = summary
+            else:
+                loader.load()
+                response = await get_response(loader)
+
             response = f"**{loader.title}**\n\n{response}"
             st.session_state.messages.append(
                 {"role": "assistant", "content": response})
