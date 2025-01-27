@@ -131,13 +131,14 @@ async def execute(title: str):
                 else:
                     loader.load()
                     response = await get_response(loader)
+                loader = YoutubeLoader.from_youtube_url(url)
 
             elif URL_KEY_TERM not in user_input:
                 context = get_context(
                     user_input, loader.video_id, loader.title)
                 print(context)
                 response = get_response_message(context, user_input)
-            response = f"**{loader.title}**\n\n{response}"
+            response = f"**{loader.title}**\n\n{response}" if loader else response
             st.session_state.messages.append(
                 {"role": "assistant", "content": response})
             st.chat_message("assistant").write(response)
