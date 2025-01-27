@@ -1,10 +1,8 @@
 import os
-import time
 import shutil
 import whisper
 import requests
 import yt_dlp as youtube_dl
-from pytubefix import YouTube
 from bs4 import BeautifulSoup
 from .constants import OUTPUT_PATH
 from langchain_text_splitters import CharacterTextSplitter
@@ -147,18 +145,6 @@ class YoutubeLoader:
         """
         self.__create_or_empty_directory(OUTPUT_PATH)
         try:
-            yt = YouTube(self.url)
-            video = yt.streams.filter(only_audio=True).first()
-            time.sleep(2)
-
-            out_file = video.download(output_path=OUTPUT_PATH)
-            base, _ = os.path.splitext(out_file)
-            new_file = base + '.mp3'
-            os.rename(out_file, new_file)
-            return new_file
-        except Exception as e:
-            print(e)
-            print("Unable to download MP3")
             output_path = f'{OUTPUT_PATH}\output.webm'
             options = {
                 'format': 'bestaudio/best',
@@ -180,6 +166,8 @@ class YoutubeLoader:
 
             print("Download complete... {}".format(output_path))
             return output_path
+        except Exception as e:
+            return
 
     def __self_transcribe_audio(self, audio_path):
         """
@@ -241,6 +229,8 @@ class YoutubeLoader:
             try:
                 # If subtitle is not set, download audio and transcribe it
                 audio_path = self.url if self.local else self.__download_audio_from_video()
+                if not audio_path:
+                    return
                 result = self.__self_transcribe_audio(audio_path)
                 if result:
                     self.sub_title = result.get("text", "")
